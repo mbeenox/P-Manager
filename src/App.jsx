@@ -275,17 +275,12 @@ async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDat
       const logoW = 130;
       const logoH = (props.height / props.width) * logoW;
       doc.addImage(business.logo, fmt, margin, y, logoW, logoH);
-      logoBottom = y + logoH + 14;
-    } catch (e) { logoBottom = y + 14; }
+      logoBottom = y + logoH + 6;
+    } catch (e) { logoBottom = y + 6; }
   }
 
-  // Business details — left-aligned, under the logo
+  // Business details — left-aligned, close under the logo
   let by = logoBottom;
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.setTextColor(...dark);
-  doc.text(business.name || "Your Business", margin, by + 4);
-  by += 20;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...grey);
@@ -397,7 +392,6 @@ function BusinessSettingsForm({ business, onSave, onCancel, saving }) {
 
   return (
     <div>
-      <Field label="Business Name"><input style={inputStyle} value={form.name} onChange={set("name")} placeholder="Acme Engineering LLC" /></Field>
       <Field label="Address (one line per row)"><textarea style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "'DM Sans', sans-serif" }} value={form.address} onChange={set("address")} placeholder={"123 Main St\nIrving, TX 75001"} /></Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
         <Field label="Email"><input style={inputStyle} value={form.email} onChange={set("email")} placeholder="billing@acme.com" /></Field>
@@ -433,7 +427,7 @@ function InvoiceModal({ project, business, onClose, showToast }) {
   const [notes, setNotes] = useState("");
   const [generating, setGenerating] = useState(false);
 
-  const businessIncomplete = !business.name;
+  const businessIncomplete = !business.logo && !business.address;
 
   const handleDownload = async () => {
     setGenerating(true);
@@ -464,9 +458,8 @@ function InvoiceModal({ project, business, onClose, showToast }) {
       {/* Preview */}
       <div style={{ background: "#fff", borderRadius: 8, padding: 24, margin: "8px 0 20px", color: "#1e2028" }}>
         <div style={{ marginBottom: 20 }}>
-          {business.logo ? <img src={business.logo} alt="logo" style={{ height: 50, maxWidth: 160, objectFit: "contain", display: "block", marginBottom: 10 }} /> : <div style={{ fontSize: 11, color: "#bbb", marginBottom: 10 }}>[ logo ]</div>}
-          <div style={{ fontWeight: 800, fontSize: 15 }}>{business.name || "Your Business"}</div>
-          <div style={{ fontSize: 10, color: "#666", whiteSpace: "pre-line", marginTop: 2 }}>{business.address}</div>
+          {business.logo ? <img src={business.logo} alt="logo" style={{ height: 50, maxWidth: 160, objectFit: "contain", display: "block", marginBottom: 4 }} /> : <div style={{ fontSize: 11, color: "#bbb", marginBottom: 4 }}>[ logo ]</div>}
+          <div style={{ fontSize: 10, color: "#666", whiteSpace: "pre-line" }}>{business.address}</div>
           {business.email && <div style={{ fontSize: 10, color: "#666" }}>{business.email}</div>}
           {business.phone && <div style={{ fontSize: 10, color: "#666" }}>{business.phone}</div>}
         </div>
@@ -740,7 +733,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button onClick={fetchProjects} className="btn-hover" style={{ background: "none", border: "1px solid #2a2d35", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: "#666", display: "flex", alignItems: "center" }} title="Refresh data"><RefreshIcon /></button>
-            <button onClick={() => setShowBusinessModal(true)} className="btn-hover" style={{ background: "none", border: "1px solid #2a2d35", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: business.name ? "#d4a053" : "#666", display: "flex", alignItems: "center" }} title="Business info for invoices"><GearIcon /></button>
+            <button onClick={() => setShowBusinessModal(true)} className="btn-hover" style={{ background: "none", border: "1px solid #2a2d35", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: (business.logo || business.address) ? "#d4a053" : "#666", display: "flex", alignItems: "center" }} title="Business info for invoices"><GearIcon /></button>
             <div style={{ display: "flex", background: "#1a1d23", borderRadius: 8, border: "1px solid #2a2d35", overflow: "hidden" }}>
               {["table", "archive", "dashboard"].map(v => (
                 <button key={v} onClick={() => setCurrentView(v)} style={{ padding: "7px 14px", background: currentView === v ? "#d4a053" : "transparent", color: currentView === v ? "#111" : "#888", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", textTransform: "capitalize", display: "flex", alignItems: "center", gap: 5 }}>
