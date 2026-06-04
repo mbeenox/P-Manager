@@ -27,6 +27,21 @@ function formatDate(d) {
   return date.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "numeric" });
 }
 function formatCurrency(n) { return "$" + Number(n).toLocaleString(); }
+
+// Build MMDDYY prefix from a YYYY-MM-DD date string
+function invoiceDatePrefix(dateStr) {
+  const d = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${mm}${dd}${yy}`;
+}
+// Settings key for the monthly invoice counter, e.g. invseq_2026_06
+function invoiceMonthKey(dateStr) {
+  const d = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+  return `invseq_${d.getFullYear()}_${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function daysUntil(dateStr) {
   if (!dateStr) return Infinity;
   const now = new Date(); now.setHours(0, 0, 0, 0);
@@ -421,19 +436,47 @@ function BusinessSettingsForm({ business, onSave, onCancel, saving }) {
 function InvoiceModal({ project, business, onClose, showToast }) {
   const today = new Date().toISOString().split("T")[0];
   const due = new Date(); due.setDate(due.getDate() + 30);
-  const [invoiceNumber, setInvoiceNumber] = useState(`INV-${project.number}`);
+  const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [dueDate, setDueDate] = useState(due.toISOString().split("T")[0]);
   const [notes, setNotes] = useState("");
   const [generating, setGenerating] = useState(false);
+  const [manuallyEdited, setManuallyEdited] = useState(false);
+  const [seqForMonth, setSeqForMonth] = useState(1);
 
   const businessIncomplete = !business.logo && !business.address;
+
+  // Look up the current month's counter and build the suggested number.
+  // Re-runs when the invoice date changes (month may differ).
+  useEffect(() => {
+    if (manuallyEdited) return;
+    let active = true;
+    (async () => {
+      const key = invoiceMonthKey(invoiceDate);
+      let count = 0;
+      try {
+        const { data } = await supabase.from("settings").select("value").eq("key", key).single();
+        if (data) count = parseInt(data.value, 10) || 0;
+      } catch (e) { /* no counter yet this month */ }
+      if (!active) return;
+      const next = count + 1;
+      setSeqForMonth(next);
+      setInvoiceNumber(`${invoiceDatePrefix(invoiceDate)}-${next}`);
+    })();
+    return () => { active = false; };
+  }, [invoiceDate, manuallyEdited]);
 
   const handleDownload = async () => {
     setGenerating(true);
     try {
       await generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate, notes });
+      // Increment & persist the month's counter only if the number wasn't manually overridden
+      if (!manuallyEdited) {
+        const key = invoiceMonthKey(invoiceDate);
+        await supabase.from("settings").upsert({ key, value: String(seqForMonth) });
+      }
       showToast("Invoice PDF downloaded", "success");
+      onClose();
     } catch (e) {
       showToast("Failed to generate PDF: " + e.message, "error");
     }
@@ -448,7 +491,7 @@ function InvoiceModal({ project, business, onClose, showToast }) {
         </div>
       )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
-        <Field label="Invoice Number"><input style={inputStyle} value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} /></Field>
+        <Field label="Invoice Number (auto-generated)"><input style={inputStyle} value={invoiceNumber} onChange={e => { setInvoiceNumber(e.target.value); setManuallyEdited(true); }} /></Field>
         <div />
         <Field label="Invoice Date"><input style={inputStyle} type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} /></Field>
         <Field label="Due Date"><input style={inputStyle} type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></Field>
