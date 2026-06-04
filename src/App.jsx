@@ -1,6 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "./supabase.js";
 
+// ── jsPDF loader (loads from CDN once, on demand) ──
+let jsPDFPromise = null;
+function loadJsPDF() {
+  if (window.jspdf) return Promise.resolve(window.jspdf.jsPDF);
+  if (jsPDFPromise) return jsPDFPromise;
+  jsPDFPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+    script.onload = () => resolve(window.jspdf.jsPDF);
+    script.onerror = () => reject(new Error("Failed to load PDF library"));
+    document.head.appendChild(script);
+  });
+  return jsPDFPromise;
+}
+
 const PROJECT_TYPES = ["Ground up", "TFO", "Conversion", "Site Adapt", "Site Adapt - Modification", "Patio Addition", "Tenant Finish out"];
 const MANAGERS = ["MJ", "EM", "SAS", "SAS/MJ", "MJ/EM"];
 const STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
@@ -53,6 +68,9 @@ const EditIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="non
 const TrashIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>;
 const RefreshIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>;
 const LoaderIcon = () => <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ animation: "spin 1s linear infinite" }}><circle cx="12" cy="12" r="10" strokeOpacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round"/></svg>;
+const InvoiceIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>;
+const GearIcon = ({ size = 18 }) => <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
+const DownloadIcon = () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>;
 
 // ── Styles ───────────────────────────────────────────────
 const inputStyle = { width: "100%", padding: "10px 12px", background: "#12141a", border: "1px solid #2a2d35", borderRadius: 8, color: "#e8e8e8", fontSize: 14, fontFamily: "'DM Sans', sans-serif", outline: "none", boxSizing: "border-box", transition: "border-color 0.2s" };
@@ -235,6 +253,250 @@ function HoursInput({ projectId, value, overBudget, onSave }) {
 }
 
 // ══════════════════════════════════════════════════════════
+// ── INVOICE PDF GENERATION ───────────────────────────────
+// ══════════════════════════════════════════════════════════
+async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate, notes }) {
+  const jsPDF = await loadJsPDF();
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 50;
+  let y = 50;
+
+  const gold = [180, 134, 47];
+  const dark = [30, 32, 40];
+  const grey = [120, 120, 120];
+
+  // Logo (if present)
+  if (business.logo) {
+    try {
+      const fmt = business.logo.includes("image/png") ? "PNG" : "JPEG";
+      doc.addImage(business.logo, fmt, margin, y, 110, 0);
+    } catch (e) { /* ignore bad logo */ }
+  }
+
+  // Business details (right-aligned)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(...dark);
+  doc.text(business.name || "Your Business", pageW - margin, y + 12, { align: "right" });
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(...grey);
+  let by = y + 28;
+  (business.address || "").split("\n").forEach(line => {
+    if (line.trim()) { doc.text(line.trim(), pageW - margin, by, { align: "right" }); by += 12; }
+  });
+  if (business.email) { doc.text(business.email, pageW - margin, by, { align: "right" }); by += 12; }
+  if (business.phone) { doc.text(business.phone, pageW - margin, by, { align: "right" }); by += 12; }
+
+  y = Math.max(by, y + 90) + 20;
+
+  // INVOICE title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(28);
+  doc.setTextColor(...gold);
+  doc.text("INVOICE", margin, y);
+  y += 28;
+
+  // Invoice meta
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...dark);
+  doc.text(`Invoice #: ${invoiceNumber}`, margin, y); y += 14;
+  doc.text(`Date: ${formatDate(invoiceDate)}`, margin, y); y += 14;
+  if (dueDate) { doc.text(`Due: ${formatDate(dueDate)}`, margin, y); y += 14; }
+  y += 16;
+
+  // Bill-to (project)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.setTextColor(...grey);
+  doc.text("PROJECT", margin, y); y += 16;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.setTextColor(...dark);
+  doc.text(project.name, margin, y); y += 14;
+  doc.setFontSize(9);
+  doc.setTextColor(...grey);
+  doc.text(`Project #: ${project.number}   State: ${project.state}   Type: ${project.type}`, margin, y);
+  y += 30;
+
+  // Line items table
+  const tableTop = y;
+  doc.setFillColor(...dark);
+  doc.rect(margin, tableTop, pageW - margin * 2, 26, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("DESCRIPTION", margin + 12, tableTop + 17);
+  doc.text("AMOUNT", pageW - margin - 12, tableTop + 17, { align: "right" });
+  y = tableTop + 26;
+
+  // Single line item = full fee
+  doc.setTextColor(...dark);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  const rowH = 30;
+  doc.setDrawColor(225, 225, 225);
+  doc.line(margin, y + rowH, pageW - margin, y + rowH);
+  const desc = `${project.type} — ${project.name}`;
+  doc.text(desc.length > 70 ? desc.slice(0, 67) + "..." : desc, margin + 12, y + 20);
+  doc.text(formatCurrency(project.fee), pageW - margin - 12, y + 20, { align: "right" });
+  y += rowH + 10;
+
+  // Total
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(...dark);
+  doc.text("TOTAL", pageW - margin - 140, y + 6);
+  doc.setTextColor(...gold);
+  doc.text(formatCurrency(project.fee), pageW - margin - 12, y + 6, { align: "right" });
+  y += 40;
+
+  // Notes
+  if (notes && notes.trim()) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(...grey);
+    doc.text("NOTES", margin, y); y += 14;
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...dark);
+    const lines = doc.splitTextToSize(notes, pageW - margin * 2);
+    doc.text(lines, margin, y);
+    y += lines.length * 12;
+  }
+
+  // Footer
+  doc.setFontSize(8);
+  doc.setTextColor(...grey);
+  doc.text("Thank you for your business.", margin, doc.internal.pageSize.getHeight() - 40);
+
+  const safeName = project.name.replace(/[^a-z0-9]/gi, "_").slice(0, 40);
+  doc.save(`Invoice_${invoiceNumber}_${safeName}.pdf`);
+}
+
+// ── Business Settings Form ──
+function BusinessSettingsForm({ business, onSave, onCancel, saving }) {
+  const [form, setForm] = useState(business);
+  const set = (f) => (e) => setForm(p => ({ ...p, [f]: e.target.value }));
+
+  const handleLogo = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500000) { alert("Logo must be under 500KB. Please use a smaller image."); return; }
+    const reader = new FileReader();
+    reader.onload = () => setForm(p => ({ ...p, logo: reader.result }));
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div>
+      <Field label="Business Name"><input style={inputStyle} value={form.name} onChange={set("name")} placeholder="Acme Engineering LLC" /></Field>
+      <Field label="Address (one line per row)"><textarea style={{ ...inputStyle, minHeight: 70, resize: "vertical", fontFamily: "'DM Sans', sans-serif" }} value={form.address} onChange={set("address")} placeholder={"123 Main St\nIrving, TX 75001"} /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+        <Field label="Email"><input style={inputStyle} value={form.email} onChange={set("email")} placeholder="billing@acme.com" /></Field>
+        <Field label="Phone"><input style={inputStyle} value={form.phone} onChange={set("phone")} placeholder="(214) 555-0100" /></Field>
+      </div>
+      <Field label="Logo (PNG or JPG, under 500KB)">
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {form.logo && <img src={form.logo} alt="logo" style={{ height: 48, maxWidth: 140, objectFit: "contain", background: "#fff", borderRadius: 6, padding: 4 }} />}
+          <label style={{ ...btnSecondary, cursor: "pointer", display: "inline-block" }}>
+            {form.logo ? "Change Logo" : "Upload Logo"}
+            <input type="file" accept="image/png,image/jpeg" onChange={handleLogo} style={{ display: "none" }} />
+          </label>
+          {form.logo && <button onClick={() => setForm(p => ({ ...p, logo: "" }))} style={{ ...btnSecondary, padding: "8px 12px", fontSize: 11 }}>Remove</button>}
+        </div>
+      </Field>
+      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 8 }}>
+        <button onClick={onCancel} style={btnSecondary}>Cancel</button>
+        <button onClick={() => onSave(form)} disabled={saving} className="btn-hover" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, display: "flex", alignItems: "center", gap: 8 }}>
+          {saving && <LoaderIcon />}Save Business Info
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Invoice Modal ──
+function InvoiceModal({ project, business, onClose, showToast }) {
+  const today = new Date().toISOString().split("T")[0];
+  const due = new Date(); due.setDate(due.getDate() + 30);
+  const [invoiceNumber, setInvoiceNumber] = useState(`INV-${project.number}`);
+  const [invoiceDate, setInvoiceDate] = useState(today);
+  const [dueDate, setDueDate] = useState(due.toISOString().split("T")[0]);
+  const [notes, setNotes] = useState("");
+  const [generating, setGenerating] = useState(false);
+
+  const businessIncomplete = !business.name;
+
+  const handleDownload = async () => {
+    setGenerating(true);
+    try {
+      await generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate, notes });
+      showToast("Invoice PDF downloaded", "success");
+    } catch (e) {
+      showToast("Failed to generate PDF: " + e.message, "error");
+    }
+    setGenerating(false);
+  };
+
+  return (
+    <div>
+      {businessIncomplete && (
+        <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12, color: "#fbbf24" }}>
+          ⚠️ Add your business info first (gear icon in the header) so it appears on the invoice.
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+        <Field label="Invoice Number"><input style={inputStyle} value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} /></Field>
+        <div />
+        <Field label="Invoice Date"><input style={inputStyle} type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} /></Field>
+        <Field label="Due Date"><input style={inputStyle} type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></Field>
+      </div>
+      <Field label="Notes (optional)"><textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Payment terms, thank-you note, etc." /></Field>
+
+      {/* Preview */}
+      <div style={{ background: "#fff", borderRadius: 8, padding: 24, margin: "8px 0 20px", color: "#1e2028" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+          <div>{business.logo ? <img src={business.logo} alt="logo" style={{ height: 44, maxWidth: 130, objectFit: "contain" }} /> : <div style={{ fontSize: 11, color: "#bbb" }}>[ logo ]</div>}</div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontWeight: 800, fontSize: 15 }}>{business.name || "Your Business"}</div>
+            <div style={{ fontSize: 10, color: "#666", whiteSpace: "pre-line", marginTop: 2 }}>{business.address}</div>
+            {business.email && <div style={{ fontSize: 10, color: "#666" }}>{business.email}</div>}
+            {business.phone && <div style={{ fontSize: 10, color: "#666" }}>{business.phone}</div>}
+          </div>
+        </div>
+        <div style={{ fontSize: 22, fontWeight: 800, color: "#b4862f", marginBottom: 8 }}>INVOICE</div>
+        <div style={{ fontSize: 11, color: "#444", marginBottom: 16 }}>
+          <div>Invoice #: {invoiceNumber}</div>
+          <div>Date: {formatDate(invoiceDate)}</div>
+          {dueDate && <div>Due: {formatDate(dueDate)}</div>}
+        </div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#888", marginBottom: 4 }}>PROJECT</div>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{project.name}</div>
+        <div style={{ fontSize: 10, color: "#888", marginBottom: 16 }}>Project #: {project.number} · {project.state} · {project.type}</div>
+        <div style={{ background: "#1e2028", color: "#fff", display: "flex", justifyContent: "space-between", padding: "8px 12px", fontSize: 10, fontWeight: 700, borderRadius: "4px 4px 0 0" }}>
+          <span>DESCRIPTION</span><span>AMOUNT</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", fontSize: 12, borderBottom: "1px solid #eee" }}>
+          <span>{project.type} — {project.name}</span><span>{formatCurrency(project.fee)}</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 30, padding: "12px", fontSize: 14, fontWeight: 800 }}>
+          <span>TOTAL</span><span style={{ color: "#b4862f" }}>{formatCurrency(project.fee)}</span>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
+        <button onClick={onClose} style={btnSecondary}>Close</button>
+        <button onClick={handleDownload} disabled={generating} className="btn-hover" style={{ ...btnPrimary, opacity: generating ? 0.6 : 1, display: "flex", alignItems: "center", gap: 8 }}>
+          {generating ? <LoaderIcon /> : <DownloadIcon />}Download PDF
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
 // ── MAIN APP ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════
 export default function App() {
@@ -259,6 +521,10 @@ export default function App() {
   const [currentView, setCurrentView] = useState("table");
   const [rate, setRate] = useState(100);
   const [rateLoaded, setRateLoaded] = useState(false);
+  const [business, setBusiness] = useState({ name: "", address: "", email: "", phone: "", logo: "" });
+  const [showBusinessModal, setShowBusinessModal] = useState(false);
+  const [savingBusiness, setSavingBusiness] = useState(false);
+  const [invoiceProject, setInvoiceProject] = useState(null);
 
   const showToast = (message, type = "info") => setToast({ message, type });
 
@@ -270,6 +536,26 @@ export default function App() {
       setRateLoaded(true);
     })();
   }, []);
+
+  // ── Load business info from Supabase ──
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.from("settings").select("value").eq("key", "business").single();
+      if (!error && data) {
+        try { setBusiness(JSON.parse(data.value)); } catch (e) { /* ignore */ }
+      }
+    })();
+  }, []);
+
+  // ── Save business info ──
+  const handleSaveBusiness = async (info) => {
+    setSavingBusiness(true);
+    const { error } = await supabase.from("settings").upsert({ key: "business", value: JSON.stringify(info) });
+    if (error) showToast("Failed to save business info: " + error.message, "error");
+    else { setBusiness(info); showToast("Business info saved", "success"); }
+    setSavingBusiness(false);
+    setShowBusinessModal(false);
+  };
 
   // ── Save rate to Supabase when changed (debounced) ──
   useEffect(() => {
@@ -450,6 +736,7 @@ export default function App() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button onClick={fetchProjects} className="btn-hover" style={{ background: "none", border: "1px solid #2a2d35", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: "#666", display: "flex", alignItems: "center" }} title="Refresh data"><RefreshIcon /></button>
+            <button onClick={() => setShowBusinessModal(true)} className="btn-hover" style={{ background: "none", border: "1px solid #2a2d35", borderRadius: 8, padding: "8px 10px", cursor: "pointer", color: business.name ? "#d4a053" : "#666", display: "flex", alignItems: "center" }} title="Business info for invoices"><GearIcon /></button>
             <div style={{ display: "flex", background: "#1a1d23", borderRadius: 8, border: "1px solid #2a2d35", overflow: "hidden" }}>
               {["table", "archive", "dashboard"].map(v => (
                 <button key={v} onClick={() => setCurrentView(v)} style={{ padding: "7px 14px", background: currentView === v ? "#d4a053" : "transparent", color: currentView === v ? "#111" : "#888", border: "none", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif", textTransform: "capitalize", display: "flex", alignItems: "center", gap: 5 }}>
@@ -591,6 +878,7 @@ export default function App() {
                         <td style={{ padding: "11px 10px", textAlign: "right", color: overBudget ? "#ef4444" : "#888", fontFamily: "'Space Mono', monospace", fontSize: 12, fontWeight: overBudget ? 800 : 400 }}>{p.hoursSpent}</td>
                         <td style={{ padding: "11px 10px", textAlign: "center" }}>
                           <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                            <button onClick={() => setInvoiceProject(p)} style={{ background: "none", border: "none", color: "#666", cursor: "pointer", padding: 6, borderRadius: 4 }} title="Generate Invoice"><InvoiceIcon /></button>
                             <button onClick={() => { setEditProject(p); setShowAddModal(true); }} style={{ background: "none", border: "none", color: "#666", cursor: "pointer", padding: 6, borderRadius: 4 }} title="Edit"><EditIcon /></button>
                             <button onClick={() => handleDeleteClick(p)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 6, borderRadius: 4 }} title="Delete"><TrashIcon /></button>
                           </div>
@@ -703,6 +991,7 @@ export default function App() {
                         </td>
                         <td style={{ padding: "11px 10px", textAlign: "center" }}>
                           <div style={{ display: "flex", justifyContent: "center", gap: 4 }}>
+                            <button onClick={() => setInvoiceProject(p)} style={{ background: "none", border: "none", color: "#666", cursor: "pointer", padding: 6, borderRadius: 4 }} title="Generate Invoice"><InvoiceIcon /></button>
                             <button onClick={() => { setEditProject(p); setShowAddModal(true); }} style={{ background: "none", border: "none", color: "#666", cursor: "pointer", padding: 6, borderRadius: 4 }} title="Edit"><EditIcon /></button>
                             <button onClick={() => handleDeleteClick(p)} style={{ background: "none", border: "none", color: "#555", cursor: "pointer", padding: 6, borderRadius: 4 }} title="Delete"><TrashIcon /></button>
                           </div>
@@ -784,6 +1073,16 @@ export default function App() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* ── BUSINESS SETTINGS MODAL ── */}
+      <Modal open={showBusinessModal} onClose={() => setShowBusinessModal(false)} title="Business Info (for invoices)" width={560}>
+        <BusinessSettingsForm business={business} onSave={handleSaveBusiness} onCancel={() => setShowBusinessModal(false)} saving={savingBusiness} />
+      </Modal>
+
+      {/* ── INVOICE MODAL ── */}
+      <Modal open={!!invoiceProject} onClose={() => setInvoiceProject(null)} title="Generate Invoice" width={620}>
+        {invoiceProject && <InvoiceModal project={invoiceProject} business={business} onClose={() => setInvoiceProject(null)} showToast={showToast} />}
       </Modal>
 
       {/* ── TOAST ── */}
