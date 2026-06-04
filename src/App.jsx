@@ -266,30 +266,36 @@ async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDat
   const dark = [30, 32, 40];
   const grey = [120, 120, 120];
 
-  // Logo (if present)
+  // Logo (if present) — placed top-left
+  let logoBottom = y;
   if (business.logo) {
     try {
       const fmt = business.logo.includes("image/png") ? "PNG" : "JPEG";
-      doc.addImage(business.logo, fmt, margin, y, 110, 0);
-    } catch (e) { /* ignore bad logo */ }
+      const props = doc.getImageProperties(business.logo);
+      const logoW = 130;
+      const logoH = (props.height / props.width) * logoW;
+      doc.addImage(business.logo, fmt, margin, y, logoW, logoH);
+      logoBottom = y + logoH + 14;
+    } catch (e) { logoBottom = y + 14; }
   }
 
-  // Business details (right-aligned)
+  // Business details — left-aligned, under the logo
+  let by = logoBottom;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
   doc.setTextColor(...dark);
-  doc.text(business.name || "Your Business", pageW - margin, y + 12, { align: "right" });
+  doc.text(business.name || "Your Business", margin, by + 4);
+  by += 20;
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(...grey);
-  let by = y + 28;
   (business.address || "").split("\n").forEach(line => {
-    if (line.trim()) { doc.text(line.trim(), pageW - margin, by, { align: "right" }); by += 12; }
+    if (line.trim()) { doc.text(line.trim(), margin, by); by += 12; }
   });
-  if (business.email) { doc.text(business.email, pageW - margin, by, { align: "right" }); by += 12; }
-  if (business.phone) { doc.text(business.phone, pageW - margin, by, { align: "right" }); by += 12; }
+  if (business.email) { doc.text(business.email, margin, by); by += 12; }
+  if (business.phone) { doc.text(business.phone, margin, by); by += 12; }
 
-  y = Math.max(by, y + 90) + 20;
+  y = by + 24;
 
   // INVOICE title
   doc.setFont("helvetica", "bold");
@@ -457,14 +463,12 @@ function InvoiceModal({ project, business, onClose, showToast }) {
 
       {/* Preview */}
       <div style={{ background: "#fff", borderRadius: 8, padding: 24, margin: "8px 0 20px", color: "#1e2028" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
-          <div>{business.logo ? <img src={business.logo} alt="logo" style={{ height: 44, maxWidth: 130, objectFit: "contain" }} /> : <div style={{ fontSize: 11, color: "#bbb" }}>[ logo ]</div>}</div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontWeight: 800, fontSize: 15 }}>{business.name || "Your Business"}</div>
-            <div style={{ fontSize: 10, color: "#666", whiteSpace: "pre-line", marginTop: 2 }}>{business.address}</div>
-            {business.email && <div style={{ fontSize: 10, color: "#666" }}>{business.email}</div>}
-            {business.phone && <div style={{ fontSize: 10, color: "#666" }}>{business.phone}</div>}
-          </div>
+        <div style={{ marginBottom: 20 }}>
+          {business.logo ? <img src={business.logo} alt="logo" style={{ height: 50, maxWidth: 160, objectFit: "contain", display: "block", marginBottom: 10 }} /> : <div style={{ fontSize: 11, color: "#bbb", marginBottom: 10 }}>[ logo ]</div>}
+          <div style={{ fontWeight: 800, fontSize: 15 }}>{business.name || "Your Business"}</div>
+          <div style={{ fontSize: 10, color: "#666", whiteSpace: "pre-line", marginTop: 2 }}>{business.address}</div>
+          {business.email && <div style={{ fontSize: 10, color: "#666" }}>{business.email}</div>}
+          {business.phone && <div style={{ fontSize: 10, color: "#666" }}>{business.phone}</div>}
         </div>
         <div style={{ fontSize: 22, fontWeight: 800, color: "#b4862f", marginBottom: 8 }}>INVOICE</div>
         <div style={{ fontSize: 11, color: "#444", marginBottom: 16 }}>
