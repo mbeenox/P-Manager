@@ -65,11 +65,11 @@ function isArchived(p) {
 
 // Map DB row → app object
 function rowToProject(r) {
-  return { id: r.id, name: r.name, number: r.number, state: r.state, manager: r.manager, type: r.type, goBy: r.go_by || "", kickOff: r.kick_off || "", qcll: r.qcll || "", pcd: r.pcd || "", fee: Number(r.fee), targetHours: Number(r.target_hours), hoursSpent: Number(r.hours_spent), holdDate: r.hold_date || "" };
+  return { id: r.id, name: r.name, number: r.number, state: r.state, manager: r.manager, type: r.type, goBy: r.go_by || "", kickOff: r.kick_off || "", qcll: r.qcll || "", pcd: r.pcd || "", fee: Number(r.fee), targetHours: Number(r.target_hours), hoursSpent: Number(r.hours_spent), holdDate: r.hold_date || "", clientName: r.client_name || "", clientAddress: r.client_address || "" };
 }
 // Map app object → DB row
 function projectToRow(p) {
-  return { name: p.name, number: p.number, state: p.state, manager: p.manager, type: p.type, go_by: p.goBy, kick_off: p.kickOff || null, qcll: p.qcll || null, pcd: p.pcd || null, fee: p.fee, target_hours: p.targetHours, hours_spent: p.hoursSpent, hold_date: p.holdDate || null };
+  return { name: p.name, number: p.number, state: p.state, manager: p.manager, type: p.type, go_by: p.goBy, kick_off: p.kickOff || null, qcll: p.qcll || null, pcd: p.pcd || null, fee: p.fee, target_hours: p.targetHours, hours_spent: p.hoursSpent, hold_date: p.holdDate || null, client_name: p.clientName || null, client_address: p.clientAddress || null };
 }
 
 // ── Icons ────────────────────────────────────────────────
@@ -140,7 +140,7 @@ function Toast({ message, type, onClose }) {
 
 // ── Project Form ─────────────────────────────────────────
 function ProjectForm({ project, onSave, onCancel, saving }) {
-  const [form, setForm] = useState(project || { name: "", number: "", state: "TX", manager: "MJ", type: "TFO", goBy: "", kickOff: "", qcll: "", pcd: "", fee: 0, hoursSpent: 0, holdDate: "" });
+  const [form, setForm] = useState(project || { name: "", number: "", state: "TX", manager: "MJ", type: "TFO", goBy: "", kickOff: "", qcll: "", pcd: "", fee: 0, hoursSpent: 0, holdDate: "", clientName: "", clientAddress: "" });
   const set = (f) => (e) => setForm(p => ({ ...p, [f]: e.target.value }));
   const setNum = (f) => (e) => setForm(p => ({ ...p, [f]: parseFloat(e.target.value) || 0 }));
   return (
@@ -164,6 +164,14 @@ function ProjectForm({ project, onSave, onCancel, saving }) {
           </div>
         </Field>
       </div>
+
+      {/* Client info — used for invoice BILL TO */}
+      <div style={{ borderTop: "1px solid #2a2d35", margin: "8px 0 16px", paddingTop: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#d4a053", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>Client (for invoice "Bill To")</div>
+        <Field label="Client Name"><input style={inputStyle} value={form.clientName} onChange={set("clientName")} placeholder="ACME Restaurants Inc." /></Field>
+        <Field label="Client Address (one line per row)"><textarea style={{ ...inputStyle, minHeight: 64, resize: "vertical", fontFamily: "'DM Sans', sans-serif" }} value={form.clientAddress} onChange={set("clientAddress")} placeholder={"456 Client Ave\nDallas, TX 75201"} /></Field>
+      </div>
+
       <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 8 }}>
         <button onClick={onCancel} style={btnSecondary}>Cancel</button>
         <button onClick={() => onSave(form)} disabled={saving} className="btn-hover" style={{ ...btnPrimary, opacity: saving ? 0.6 : 1, display: "flex", alignItems: "center", gap: 8 }}>
@@ -270,7 +278,7 @@ function HoursInput({ projectId, value, overBudget, onSave }) {
 // ══════════════════════════════════════════════════════════
 // ── INVOICE PDF GENERATION ───────────────────────────────
 // ══════════════════════════════════════════════════════════
-async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate, notes }) {
+async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate }) {
   const jsPDF = await loadJsPDF();
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -323,7 +331,26 @@ async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDat
   if (dueDate) { doc.text(`Due: ${formatDate(dueDate)}`, margin, y); y += 14; }
   y += 16;
 
-  // Bill-to (project)
+  // BILL TO (client)
+  if (project.clientName || project.clientAddress) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(...grey);
+    doc.text("BILL TO", margin, y); y += 16;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(...dark);
+    if (project.clientName) { doc.text(project.clientName, margin, y); y += 14; }
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(...grey);
+    (project.clientAddress || "").split("\n").forEach(line => {
+      if (line.trim()) { doc.text(line.trim(), margin, y); y += 12; }
+    });
+    y += 18;
+  }
+
+  // Project
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.setTextColor(...grey);
@@ -368,19 +395,6 @@ async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDat
   doc.setTextColor(...gold);
   doc.text(formatCurrency(project.fee), pageW - margin - 12, y + 6, { align: "right" });
   y += 40;
-
-  // Notes
-  if (notes && notes.trim()) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor(...grey);
-    doc.text("NOTES", margin, y); y += 14;
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(...dark);
-    const lines = doc.splitTextToSize(notes, pageW - margin * 2);
-    doc.text(lines, margin, y);
-    y += lines.length * 12;
-  }
 
   // Footer
   doc.setFontSize(8);
@@ -439,7 +453,6 @@ function InvoiceModal({ project, business, onClose, showToast }) {
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [dueDate, setDueDate] = useState(due.toISOString().split("T")[0]);
-  const [notes, setNotes] = useState("");
   const [generating, setGenerating] = useState(false);
   const [manuallyEdited, setManuallyEdited] = useState(false);
   const [seqForMonth, setSeqForMonth] = useState(1);
@@ -469,7 +482,7 @@ function InvoiceModal({ project, business, onClose, showToast }) {
   const handleDownload = async () => {
     setGenerating(true);
     try {
-      await generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate, notes });
+      await generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate });
       // Increment & persist the month's counter only if the number wasn't manually overridden
       if (!manuallyEdited) {
         const key = invoiceMonthKey(invoiceDate);
@@ -496,7 +509,11 @@ function InvoiceModal({ project, business, onClose, showToast }) {
         <Field label="Invoice Date"><input style={inputStyle} type="date" value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} /></Field>
         <Field label="Due Date"><input style={inputStyle} type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} /></Field>
       </div>
-      <Field label="Notes (optional)"><textarea style={{ ...inputStyle, minHeight: 60, resize: "vertical" }} value={notes} onChange={e => setNotes(e.target.value)} placeholder="Payment terms, thank-you note, etc." /></Field>
+      {!project.clientName && !project.clientAddress && (
+        <div style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12, color: "#fbbf24" }}>
+          ⚠️ No client info on this project yet. Edit the project to add a Client Name & Address — they'll appear in the "Bill To" section.
+        </div>
+      )}
 
       {/* Preview */}
       <div style={{ background: "#fff", borderRadius: 8, padding: 24, margin: "8px 0 20px", color: "#1e2028" }}>
@@ -512,6 +529,13 @@ function InvoiceModal({ project, business, onClose, showToast }) {
           <div>Date: {formatDate(invoiceDate)}</div>
           {dueDate && <div>Due: {formatDate(dueDate)}</div>}
         </div>
+        {(project.clientName || project.clientAddress) && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#888", marginBottom: 4 }}>BILL TO</div>
+            {project.clientName && <div style={{ fontSize: 12, fontWeight: 700 }}>{project.clientName}</div>}
+            <div style={{ fontSize: 10, color: "#666", whiteSpace: "pre-line" }}>{project.clientAddress}</div>
+          </div>
+        )}
         <div style={{ fontSize: 10, fontWeight: 700, color: "#888", marginBottom: 4 }}>PROJECT</div>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{project.name}</div>
         <div style={{ fontSize: 10, color: "#888", marginBottom: 16 }}>Project #: {project.number} · {project.state} · {project.type}</div>
