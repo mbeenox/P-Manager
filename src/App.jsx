@@ -435,7 +435,7 @@ function BusinessSettingsForm({ business, onSave, onCancel, saving }) {
 // ── Invoice Modal ──
 function InvoiceModal({ project, business, onClose, showToast }) {
   const today = new Date().toISOString().split("T")[0];
-  const due = new Date(); due.setDate(due.getDate() + 30);
+  const due = new Date(); due.setMonth(due.getMonth() + 2);
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState(today);
   const [dueDate, setDueDate] = useState(due.toISOString().split("T")[0]);
