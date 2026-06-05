@@ -278,7 +278,7 @@ function HoursInput({ projectId, value, overBudget, onSave }) {
 // ══════════════════════════════════════════════════════════
 // ── INVOICE PDF GENERATION ───────────────────────────────
 // ══════════════════════════════════════════════════════════
-async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate }) {
+async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate, lineItems }) {
   const jsPDF = await loadJsPDF();
   const doc = new jsPDF({ unit: "pt", format: "letter" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -366,26 +366,45 @@ async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDat
 
   // Line items table
   const tableTop = y;
+  // Column x-positions
+  const colActivityX = margin + 12;
+  const colDescX = margin + 150;
+  const colAmountX = pageW - margin - 12;
+  const tableW = pageW - margin * 2;
+
   doc.setFillColor(...dark);
-  doc.rect(margin, tableTop, pageW - margin * 2, 26, "F");
+  doc.rect(margin, tableTop, tableW, 26, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
-  doc.text("DESCRIPTION", margin + 12, tableTop + 17);
-  doc.text("AMOUNT", pageW - margin - 12, tableTop + 17, { align: "right" });
+  doc.text("ACTIVITY", colActivityX, tableTop + 17);
+  doc.text("DESCRIPTION", colDescX, tableTop + 17);
+  doc.text("AMOUNT", colAmountX, tableTop + 17, { align: "right" });
   y = tableTop + 26;
 
-  // Single line item = full fee
+  // Line items
   doc.setTextColor(...dark);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
-  const rowH = 30;
   doc.setDrawColor(225, 225, 225);
-  doc.line(margin, y + rowH, pageW - margin, y + rowH);
-  const desc = `${project.type} — ${project.name}`;
-  doc.text(desc.length > 70 ? desc.slice(0, 67) + "..." : desc, margin + 12, y + 20);
-  doc.text(formatCurrency(project.fee), pageW - margin - 12, y + 20, { align: "right" });
-  y += rowH + 10;
+
+  const items = (lineItems && lineItems.length) ? lineItems : [{ activity: "", description: "", amount: project.fee }];
+  let total = 0;
+  items.forEach(item => {
+    const amt = parseFloat(item.amount) || 0;
+    total += amt;
+    // wrap activity and description to their column widths
+    const actLines = doc.splitTextToSize(item.activity || "", colDescX - colActivityX - 8);
+    const descLines = doc.splitTextToSize(item.description || "", colAmountX - colDescX - 8);
+    const rows = Math.max(actLines.length, descLines.length, 1);
+    const rowH = 18 + (rows - 1) * 12;
+    doc.text(actLines, colActivityX, y + 16);
+    doc.text(descLines, colDescX, y + 16);
+    doc.text(formatCurrency(amt), colAmountX, y + 16, { align: "right" });
+    doc.line(margin, y + rowH + 6, pageW - margin, y + rowH + 6);
+    y += rowH + 6;
+  });
+  y += 12;
 
   // Total
   doc.setFont("helvetica", "bold");
@@ -393,7 +412,7 @@ async function generateInvoicePDF({ project, business, invoiceNumber, invoiceDat
   doc.setTextColor(...dark);
   doc.text("TOTAL", pageW - margin - 140, y + 6);
   doc.setTextColor(...gold);
-  doc.text(formatCurrency(project.fee), pageW - margin - 12, y + 6, { align: "right" });
+  doc.text(formatCurrency(total), colAmountX, y + 6, { align: "right" });
   y += 40;
 
   // Footer
@@ -456,8 +475,14 @@ function InvoiceModal({ project, business, onClose, showToast }) {
   const [generating, setGenerating] = useState(false);
   const [manuallyEdited, setManuallyEdited] = useState(false);
   const [seqForMonth, setSeqForMonth] = useState(1);
+  const [lineItems, setLineItems] = useState([{ activity: "", description: "", amount: project.fee }]);
 
   const businessIncomplete = !business.logo && !business.address;
+  const itemsTotal = lineItems.reduce((s, it) => s + (parseFloat(it.amount) || 0), 0);
+
+  const updateItem = (idx, field, value) => setLineItems(items => items.map((it, i) => i === idx ? { ...it, [field]: value } : it));
+  const addItem = () => setLineItems(items => [...items, { activity: "", description: "", amount: 0 }]);
+  const removeItem = (idx) => setLineItems(items => items.length > 1 ? items.filter((_, i) => i !== idx) : items);
 
   // Look up the current month's counter and build the suggested number.
   // Re-runs when the invoice date changes (month may differ).
@@ -482,7 +507,7 @@ function InvoiceModal({ project, business, onClose, showToast }) {
   const handleDownload = async () => {
     setGenerating(true);
     try {
-      await generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate });
+      await generateInvoicePDF({ project, business, invoiceNumber, invoiceDate, dueDate, lineItems });
       // Increment & persist the month's counter only if the number wasn't manually overridden
       if (!manuallyEdited) {
         const key = invoiceMonthKey(invoiceDate);
@@ -515,6 +540,24 @@ function InvoiceModal({ project, business, onClose, showToast }) {
         </div>
       )}
 
+      {/* Line item editor */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#d4a053", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Line Items</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 0.7fr 32px", gap: 8, marginBottom: 6, fontSize: 10, fontWeight: 700, color: "#888", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          <div>Activity</div><div>Description</div><div style={{ textAlign: "right" }}>Amount</div><div />
+        </div>
+        {lineItems.map((it, idx) => (
+          <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 0.7fr 32px", gap: 8, marginBottom: 8, alignItems: "center" }}>
+            <input style={{ ...inputStyle, padding: "8px 10px" }} value={it.activity} onChange={e => updateItem(idx, "activity", e.target.value)} placeholder="e.g. Design" />
+            <input style={{ ...inputStyle, padding: "8px 10px" }} value={it.description} onChange={e => updateItem(idx, "description", e.target.value)} placeholder="Details…" />
+            <input style={{ ...inputStyle, padding: "8px 10px", textAlign: "right" }} type="number" value={it.amount} onChange={e => updateItem(idx, "amount", e.target.value)} />
+            <button onClick={() => removeItem(idx)} disabled={lineItems.length === 1} style={{ background: "none", border: "none", color: lineItems.length === 1 ? "#333" : "#888", cursor: lineItems.length === 1 ? "default" : "pointer", padding: 6, display: "flex", justifyContent: "center" }} title="Remove line"><TrashIcon /></button>
+          </div>
+        ))}
+        <button onClick={addItem} className="btn-hover" style={{ ...btnSecondary, padding: "8px 14px", fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6, marginTop: 4 }}><PlusIcon /> Add Line Item</button>
+        <div style={{ textAlign: "right", marginTop: 10, fontSize: 13, fontWeight: 700, color: "#d4a053" }}>Total: {formatCurrency(itemsTotal)}</div>
+      </div>
+
       {/* Preview */}
       <div style={{ background: "#fff", borderRadius: 8, padding: 24, margin: "8px 0 20px", color: "#1e2028" }}>
         <div style={{ marginBottom: 20 }}>
@@ -539,14 +582,18 @@ function InvoiceModal({ project, business, onClose, showToast }) {
         <div style={{ fontSize: 10, fontWeight: 700, color: "#888", marginBottom: 4 }}>PROJECT</div>
         <div style={{ fontSize: 13, fontWeight: 600 }}>{project.name}</div>
         <div style={{ fontSize: 10, color: "#888", marginBottom: 16 }}>Project #: {project.number} · {project.state} · {project.type}</div>
-        <div style={{ background: "#1e2028", color: "#fff", display: "flex", justifyContent: "space-between", padding: "8px 12px", fontSize: 10, fontWeight: 700, borderRadius: "4px 4px 0 0" }}>
-          <span>DESCRIPTION</span><span>AMOUNT</span>
+        <div style={{ background: "#1e2028", color: "#fff", display: "grid", gridTemplateColumns: "1fr 1.4fr 0.7fr", padding: "8px 12px", fontSize: 10, fontWeight: 700, borderRadius: "4px 4px 0 0" }}>
+          <span>ACTIVITY</span><span>DESCRIPTION</span><span style={{ textAlign: "right" }}>AMOUNT</span>
         </div>
-        <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 12px", fontSize: 12, borderBottom: "1px solid #eee" }}>
-          <span>{project.type} — {project.name}</span><span>{formatCurrency(project.fee)}</span>
-        </div>
+        {lineItems.map((it, idx) => (
+          <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr 0.7fr", padding: "10px 12px", fontSize: 12, borderBottom: "1px solid #eee", gap: 8 }}>
+            <span style={{ wordBreak: "break-word" }}>{it.activity || <span style={{ color: "#ccc" }}>—</span>}</span>
+            <span style={{ wordBreak: "break-word" }}>{it.description || <span style={{ color: "#ccc" }}>—</span>}</span>
+            <span style={{ textAlign: "right" }}>{formatCurrency(parseFloat(it.amount) || 0)}</span>
+          </div>
+        ))}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 30, padding: "12px", fontSize: 14, fontWeight: 800 }}>
-          <span>TOTAL</span><span style={{ color: "#b4862f" }}>{formatCurrency(project.fee)}</span>
+          <span>TOTAL</span><span style={{ color: "#b4862f" }}>{formatCurrency(itemsTotal)}</span>
         </div>
       </div>
 
